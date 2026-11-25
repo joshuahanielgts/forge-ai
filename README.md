@@ -2,26 +2,40 @@
 
 Brief in, tested agent out. Assignment: OceanAI Jr. GenAI Engineer, campus round.
 
-## Status (2026-11-25)
+## Status (2026-11-26)
 
 | Req | Item | State |
 |---|---|---|
-| 1 | Intake interviewer (<=5 questions, requirements doc) | Not started |
+| 1 | Intake interviewer (<=5 questions, requirements doc) | Done. Questions capped in code at 5. Non-interactive mode does not block. Approve-or-edit is opt-in (`--checkpoint`). 12/12 passing. |
 | 2 | Groundability guard | Not started. Design below. |
 | 3 | Agent generator (prompt, retrieval, tools, output contract) | Not started |
 | 4 | Eval generator (>=20 cases, generation prompts committed) | Not started |
 | 5 | Judge (LLM + deterministic checks) | Not started |
 | 6 | Critic-optimizer loop (max 3 iterations, change log) | Not started |
 | 7 | Honest report and scorecard | Not started |
-| 8 | Runnable chat runner | Not started |
-| 9 | Two end-to-end demo runs, committed in full | Blocked on a local model (see below) |
+| 8 | Runnable chat runner | Not started. CLI when built. Streamlit only after all nine core requirements pass. |
+| 9 | Two end-to-end demo runs, committed in full | Not started. Briefs approved. Model chosen. Documents not built yet. |
 
-Built and tested (stdlib only, 7/7 passing):
-- `tools/registry.py`: four tools (csv_lookup, calculator, current_date, weather) and `attach()`, which returns only the tools a brief requests. Unknown tool names raise an error.
-- `tests/test_registry.py`: tests include a code-injection check on the calculator.
-Run with: `python3 -I tests/test_registry.py`
+Built and tested (stdlib, plus `pypdf` for PDF text only):
+- `tools/registry.py`: four tools (csv_lookup, calculator, current_date, weather) and `attach()`, which returns only the tools a brief requests. Unknown tool names raise an error. 7/7 passing, including a code-injection check on the calculator.
+- `forgeai/llm.py`: OpenAI-compatible `/v1/chat/completions` client. Default model `qwen2.5:3b-instruct` (`FORGEAI_MODEL` overrides it). Timeout, two retries on connection failure and HTTP 5xx, no retry on 4xx, call log at `runs/<run-id>/calls.jsonl`. 4/4 passing against a local fake server. The live smoke skipped: nothing accepted a connection on `FORGEAI_BASE_URL` (default `http://127.0.0.1:11434/v1`).
+- `forgeai/retrieval.py`: paragraph chunking and BM25 for `.txt`, `.md`, `.csv`, and `.pdf`. 10/10 passing.
+- `forgeai/intake.py`: reads a brief, inventories the document folder (name, type, bytes, PDF pages, CSV rows), asks at most 5 clarifying questions, and writes `runs/<run-id>/requirements.json` and `requirements.md`. Prompts are in `prompts/intake/`. 12/12 passing with scripted stdin and a fake model. No live model call.
+
+`pypdf`: the Python standard library cannot extract PDF text, and both approved demos are PDF-backed.
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -I tests\test_registry.py
+.\.venv\Scripts\python.exe -I tests\test_llm.py
+.\.venv\Scripts\python.exe -I tests\test_retrieval.py
+.\.venv\Scripts\python.exe -I tests\test_intake.py
+.\.venv\Scripts\python.exe -m forgeai.intake --brief "..." --docs path\to\docs --run-id run1
+```
 
 ## Blockers in this sandbox
+
+These notes describe the sandbox where the scaffold was drafted. They are not a measurement of this Windows machine. What this checkout verified is the test modules above. The live model call did not run.
 
 - huggingface.co, ollama.com, and api.open-meteo.com are unreachable. Model weights cannot be downloaded here.
 - 2 CPU cores, 7.8 GB RAM, no GPU. Nothing useful runs locally here.
@@ -33,8 +47,8 @@ Consequence: requirements 1-8 can be written here, but requirement 9 and any rea
 ## Architecture
 
 - Model interface: OpenAI-compatible `/v1/chat/completions`. Ollama exposes this locally. Stages never import a model SDK directly.
-- Recommended model: Qwen2.5-3B-Instruct or Llama-3.2-3B-Instruct (Q4). A 7B model at Q4 needs about 6 GB free RAM, which is tight on an 8 GB laptop. Confirm your RAM before choosing.
-- Retrieval: chunk documents, TF-IDF or BM25 with no embedding model, so retrieval runs without another model download. Simpler, fewer failure points, and easier to defend.
+- Runtime model: Qwen2.5-3B-Instruct, Ollama tag `qwen2.5:3b-instruct`. It fits in the RTX 3050's 6 GB of VRAM. A 7B model is an optional extra pass on the two demos only, not the factory default. Llama is not a candidate.
+- Retrieval: chunk documents, BM25, no embedding model. PDF text is extracted with `pypdf`.
 
 ## Design risks (stress-tested)
 
@@ -45,8 +59,12 @@ Consequence: requirements 1-8 can be written here, but requirement 9 and any rea
 5. **"Unseen brief at review."** Any choice that works only on your two demos is a defect. Test on a third, deliberately different brief before the review, and treat any hard-coded domain term as a bug.
 6. **Scope.** Nine mandatory requirements, two committed demos, and an unattended run is a multi-week build. One evening will not finish it. Cut stretch goals first. Do not cut the honest report, the change log, or the deterministic checks.
 
-## Decisions needed from you
+## Decisions
 
-1. Your machine: RAM, GPU (if any), OS.
-2. Which two demo briefs and document sets. Suggested: HR policy over 2-3 public HR PDFs, plus a ship-spares procurement assistant over a catalogue CSV and supplier PDFs.
-3. Whether to ship a Streamlit UI (stretch) or keep to the CLI.
+1. Machine: Windows, RTX 3050 with 6 GB VRAM. System RAM was not stated. The 3B model fits fully in VRAM.
+2. Model: Qwen2.5-3B-Instruct (`qwen2.5:3b-instruct` in Ollama). A 7B model is an optional extra pass on the demos only.
+3. Demo 1: HR policy assistant over 2–3 public HR policy PDFs. Demo 2: ship-spares procurement assistant over a catalogue CSV plus supplier PDFs. Synthesis prompts or source URLs are committed under `demos/` when those documents are built. Not built yet.
+4. Chat runner: CLI. Streamlit only after all nine core requirements pass.
+5. `pypdf` is approved. No other third-party package without asking.
+
+Still open: the assignment lists "requester approves or edits the requirements before generation" as a stretch goal. Stage 2 in `IDE_PROMPTS.md` treats that pause as mandatory. This checkout follows the PDF. The pause is available with `--checkpoint` and is off by default, because review day runs unattended. Say if you want it on by default.
