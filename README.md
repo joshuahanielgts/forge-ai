@@ -7,7 +7,7 @@ Brief in, tested agent out. Assignment: OceanAI Jr. GenAI Engineer, campus round
 | Req | Item | State |
 |---|---|---|
 | 1 | Intake interviewer (<=5 questions, requirements doc) | Done. Questions capped in code at 5. Non-interactive mode does not block. Approve-or-edit is opt-in (`--checkpoint`). 12/12 passing. |
-| 2 | Groundability guard | Not started. Design below. |
+| 2 | Groundability guard | Done. Deterministic BM25, threshold from the calibration file, non-zero exit on an unsupported topic unless `--accept-gap`. 8/8 passing. Overlap count on the fixture lists is 0. |
 | 3 | Agent generator (prompt, retrieval, tools, output contract) | Not started |
 | 4 | Eval generator (>=20 cases, generation prompts committed) | Not started |
 | 5 | Judge (LLM + deterministic checks) | Not started |
@@ -21,6 +21,7 @@ Built and tested (stdlib, plus `pypdf` for PDF text only):
 - `forgeai/llm.py`: OpenAI-compatible `/v1/chat/completions` client. Default model `qwen2.5:3b-instruct` (`FORGEAI_MODEL` overrides it). Timeout, two retries on connection failure and HTTP 5xx, no retry on 4xx, call log at `runs/<run-id>/calls.jsonl`. 4/4 passing against a local fake server. The live smoke skipped: nothing accepted a connection on `FORGEAI_BASE_URL` (default `http://127.0.0.1:11434/v1`).
 - `forgeai/retrieval.py`: paragraph chunking and BM25 for `.txt`, `.md`, `.csv`, and `.pdf`. 10/10 passing.
 - `forgeai/intake.py`: reads a brief, inventories the document folder (name, type, bytes, PDF pages, CSV rows), asks at most 5 clarifying questions, and writes `runs/<run-id>/requirements.json` and `requirements.md`. Prompts are in `prompts/intake/`. 12/12 passing with scripted stdin and a fake model. No live model call.
+- `forgeai/guard.py`: scores each must-answer topic with BM25 and flags it unsupported when the best score is below `tests/fixtures/groundability_threshold.json`. No model call. On the fixture corpus, min supported score is 2.245001920848362, max unsupported score is 0, overlap count is 0, threshold is 1.122500960424181. 8/8 passing. No topic was left unseparated.
 
 `pypdf`: the Python standard library cannot extract PDF text, and both approved demos are PDF-backed.
 
@@ -30,7 +31,9 @@ Built and tested (stdlib, plus `pypdf` for PDF text only):
 .\.venv\Scripts\python.exe -I tests\test_llm.py
 .\.venv\Scripts\python.exe -I tests\test_retrieval.py
 .\.venv\Scripts\python.exe -I tests\test_intake.py
+.\.venv\Scripts\python.exe -I tests\test_guard.py
 .\.venv\Scripts\python.exe -m forgeai.intake --brief "..." --docs path\to\docs --run-id run1
+.\.venv\Scripts\python.exe -m forgeai.guard --requirements runs\run1\requirements.json --docs path\to\docs --run-id run1
 ```
 
 ## Blockers in this sandbox
@@ -54,7 +57,7 @@ Consequence: requirements 1-8 can be written here, but requirement 9 and any rea
 
 1. **Circular judging.** If the same small model writes the answers, writes the eval questions, and judges the answers, the scores measure self-consistency, not quality. Mitigation: deterministic checks first. A case is grounded only if its expected key fact appears verbatim in a retrieved chunk. Refusals are checked against a labelled out-of-scope set. The LLM judge runs only on the residue, with position-swapped pairs to counter position bias.
 2. **Eval questions the model can answer from priors.** Generated questions can be answered without the documents. Mitigation: every generated case must carry an expected fact that is a substring of its source document. Cases failing that check are discarded and logged.
-3. **The groundability guard is the hardest requirement.** "Can the documents support this brief?" cannot be answered by asking the model. Mitigation: decompose the brief into must-answer topics, retrieve for each, and flag topics with no chunk above a similarity threshold. The threshold must be calibrated on known-good and known-missing topics, not guessed.
+3. **The groundability guard is the hardest requirement.** "Can the documents support this brief?" cannot be answered by asking the model. Mitigation: decompose each must-answer topic into a query, retrieve, and flag a topic whose best BM25 score is below the cutoff in `tests/fixtures/groundability_threshold.json`. That cutoff is the midpoint that separates the fixture lists. On this corpus the lists do not overlap.
 4. **Critic-optimizer loop can overfit to its own evals.** Fixes tuned to a fixed eval set improve the score without improving the agent. Mitigation: split the eval set. Generate it once, freeze it, and report the score on the held-out half.
 5. **"Unseen brief at review."** Any choice that works only on your two demos is a defect. Test on a third, deliberately different brief before the review, and treat any hard-coded domain term as a bug.
 6. **Scope.** Nine mandatory requirements, two committed demos, and an unattended run is a multi-week build. One evening will not finish it. Cut stretch goals first. Do not cut the honest report, the change log, or the deterministic checks.
